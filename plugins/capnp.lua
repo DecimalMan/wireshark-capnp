@@ -41,8 +41,15 @@ function proto.dissector(buf, pkt, root)
    -- didn't find any reliable way to see if it is a TCP or UDP packet!
    dir = pkt.dst_port == tcp_port or pkt.dst_port == udp_port
 
+   local starting_len = buf:len()
    local desc
    while buf:len() > 0 do
+      local desegment = check_segmentation(buf)
+      if desegment ~= nil then
+         pkt.desegment_len = desegment
+         pkt.desegment_offset = starting_len - buf:len()
+      end
+
       local d
       buf, d = dissect.message(buf, pkt, root)
       if desc then
@@ -54,6 +61,21 @@ function proto.dissector(buf, pkt, root)
 
    local marker = dir_marker[dir] or ""
    pkt.cols.info:set(marker .. desc)
+end
+
+function check_segmentation(buf)
+   local seg_table_len = 4 * (buf(0, 4):le_uint() + 1)
+   if buf:len() < seg_table_len then
+      return seg_table_len - buf:len()
+   end
+
+   local packet_len = 4 + seg_table_len
+   for offset = 4, seg_table_len, 4 do
+      packet_len = packet_len + 8 * buf(offset, 4):le_uint()
+   end
+   if buf:len() < packet_len then
+      return packet_len - buf:len()
+   end
 end
 
 local function unregister(name, port)
